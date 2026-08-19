@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { getDigitPoints } from '../utils/shapePoints'
 
-const PARTICLE_COUNT = 1400
+const PARTICLE_COUNT = 1000
 const EASE = 0.08
 const COLORS = [
   '#7dd3fc',
@@ -14,10 +14,8 @@ const COLORS = [
   '#fdba74',
 ]
 
-// Renders and animates the particle field. When `number` is 0 the dots
-// float around freely (like the reference clip); when it's 1-10 they
-// ease into the shape of that digit.
-export default function ParticleField({ number }) {
+// High performance particle field (no heavy canvas shadow/blur filters)
+export default function ParticleField({ number, isClapped }) {
   const canvasRef = useRef(null)
   const particlesRef = useRef([])
   const numberRef = useRef(number)
@@ -25,6 +23,25 @@ export default function ParticleField({ number }) {
   useEffect(() => {
     numberRef.current = number
   }, [number])
+
+  // Trigger explosion / scatter effect when clapping after 10
+  useEffect(() => {
+    if (isClapped && particlesRef.current.length > 0) {
+      const centerX = window.innerWidth / 2
+      const centerY = window.innerHeight / 2
+
+      particlesRef.current.forEach((p) => {
+        // Reset target shape so they fly freely
+        p.tx = null
+        p.ty = null
+        // Calculate outward angle from center
+        const angle = Math.atan2(p.y - centerY, p.x - centerX) + (Math.random() - 0.5) * 0.5
+        const speed = Math.random() * 22 + 10 // high burst speed
+        p.vx = Math.cos(angle) * speed
+        p.vy = Math.sin(angle) * speed
+      })
+    }
+  }, [isClapped])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -39,7 +56,7 @@ export default function ParticleField({ number }) {
       vy: (Math.random() - 0.5) * 0.6,
       tx: null,
       ty: null,
-      size: Math.random() * 2 + 1,
+      size: Math.random() * 1.5 + 1.2,
       color: COLORS[Math.floor(Math.random() * COLORS.length)],
     }))
 
@@ -84,23 +101,43 @@ export default function ParticleField({ number }) {
       }
 
       ctx.clearRect(0, 0, width, height)
-      ctx.globalCompositeOperation = 'lighter'
+
+      // Group draw calls by color to minimize context state changes
+      const groups = {}
+      for (const color of COLORS) {
+        groups[color] = []
+      }
 
       for (const p of particlesRef.current) {
         if (p.tx !== null) {
           p.x += (p.tx - p.x) * EASE
           p.y += (p.ty - p.y) * EASE
         } else {
+          // If in explosion mode (high velocity), apply natural friction/drag
+          if (Math.abs(p.vx) > 1 || Math.abs(p.vy) > 1) {
+            p.vx *= 0.94
+            p.vy *= 0.94
+          }
           p.x += p.vx
           p.y += p.vy
           if (p.x < 0 || p.x > width) p.vx *= -1
           if (p.y < 0 || p.y > height) p.vy *= -1
         }
 
+        if (groups[p.color]) {
+          groups[p.color].push(p)
+        }
+      }
+
+      for (const color in groups) {
+        const list = groups[color]
+        if (!list.length) continue
+        ctx.fillStyle = color
         ctx.beginPath()
-        ctx.fillStyle = p.color
-        ctx.globalAlpha = 0.85
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2)
+        for (const p of list) {
+          ctx.moveTo(p.x + p.size, p.y)
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2)
+        }
         ctx.fill()
       }
 
@@ -114,5 +151,5 @@ export default function ParticleField({ number }) {
     }
   }, [])
 
-  return <canvas ref={canvasRef} className="absolute inset-0 block" />
+  return <canvas ref={canvasRef} className="absolute inset-0 block bg-black" />
 }
